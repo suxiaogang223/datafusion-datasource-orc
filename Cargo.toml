@@ -1,0 +1,75 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[package]
+name = "datafusion-orc-extension"
+version = "0.1.0"
+edition = "2021"
+authors = ["suxiaogang223 <suxiaogang223@icloud.com>"]
+license = "Apache-2.0"
+description = "ORC file format support for Apache DataFusion"
+readme = "README.md"
+repository = "https://github.com/suxiaogang223/datafusion-orc-extension"
+rust-version = "1.73"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# Arrow
+arrow = { version = "57.1.0", features = ["prettyprint", "chrono-tz"] }
+arrow-schema = "57.1.0"
+
+# DataFusion dependencies
+datafusion-common = { version = "51.0.0", default-features = false, features = ["object_store"] }
+datafusion-common-runtime = "51.0.0"
+datafusion-datasource = { version = "51.0.0", default-features = false }
+datafusion-execution = { version = "51.0.0", default-features = false }
+datafusion-expr = "51.0.0"
+datafusion-physical-expr = { version = "51.0.0", default-features = false }
+datafusion-physical-expr-adapter = "51.0.0"
+datafusion-physical-expr-common = "51.0.0"
+datafusion-physical-plan = "51.0.0"
+datafusion-session = "51.0.0"
+
+# ORC Rust
+orc-rust = { version = "0.7.1", default-features = false, features = ["async"] }
+
+# Async and runtime
+async-trait = "0.1.89"
+futures = "0.3"
+tokio = { version = "1.28", features = ["rt", "rt-multi-thread", "io-util", "fs", "macros"] }
+
+# Object store
+object_store = { version = "0.12.4", default-features = false }
+
+# Utilities
+bytes = "1.11"
+log = "^0.4"
+itertools = "0.14"
+
+[dev-dependencies]
+# Test utilities
+datafusion = { version = "51.0.0", default-features = false }
+
+# TODO: Remove this once we have a proper workspace setup
+[lints.rust]
+unused = "warn"
+
+[lib]
+name = "datafusion_orc_extension"
+path = "src/lib.rs"

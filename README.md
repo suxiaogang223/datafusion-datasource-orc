@@ -30,8 +30,8 @@ A DataFusion extension providing ORC (Optimized Row Columnar) file format suppor
 
 - [x] Project structure initialization
 - [x] Implementation plan documentation
-- [ ] Configure Cargo.toml dependencies
-- [ ] Create module structure
+- [x] Configure Cargo.toml dependencies
+- [x] Create module structure
 
 ### Phase 2: Core FileFormat Implementation
 
