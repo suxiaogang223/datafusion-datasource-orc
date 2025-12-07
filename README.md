@@ -79,9 +79,10 @@ A DataFusion extension providing ORC (Optimized Row Columnar) file format suppor
   - [x] Multi-file schema merging
 - [x] Basic statistics extraction
   - [x] File-level statistics (row count, file size)
-- [ ] Testing and validation
+- [x] Testing and validation
+  - [x] Integration tests with sample ORC files
+  - [x] Schema inference tests (basic types and complex types)
   - [ ] Unit tests for basic reading
-  - [ ] Integration tests with sample ORC files
   - [ ] Error handling tests
 - [ ] Documentation
   - [ ] Basic usage examples
