@@ -108,21 +108,24 @@ impl FileOpener for OrcOpener {
                     })?;
 
                 // Apply projection if not all columns are needed
-                let file_metadata = arrow_reader_builder.file_metadata();
-                let root_data_type = file_metadata.root_data_type();
+                let (projection_mask, file_column_count) = {
+                    let file_metadata = arrow_reader_builder.file_metadata();
+                    let root_data_type = file_metadata.root_data_type();
 
-                // Check if we need to apply projection
-                // If projection includes all columns, use ProjectionMask::all()
-                // Otherwise, create a projection mask
-                let projection_mask = if projection.is_empty() {
-                    ProjectionMask::roots(root_data_type, std::iter::empty())
-                } else if projection.len() == root_data_type.children().len()
-                    && projection.iter().enumerate().all(|(i, &idx)| i == idx)
-                {
-                    ProjectionMask::all()
-                } else {
-                    // TODO: implement projection pushdown once schema reconciliation is available
-                    ProjectionMask::all()
+                    let file_len = root_data_type.children().len();
+
+                    let mask = if projection.is_empty() {
+                        ProjectionMask::roots(root_data_type, std::iter::empty())
+                    } else if projection.len() == file_len
+                        && projection.iter().enumerate().all(|(i, &idx)| i == idx)
+                    {
+                        ProjectionMask::all()
+                    } else {
+                        // TODO: implement projection pushdown once schema reconciliation is available
+                        ProjectionMask::all()
+                    };
+
+                    (mask, file_len)
                 };
 
                 // Apply projection and batch size
@@ -141,10 +144,9 @@ impl FileOpener for OrcOpener {
                 });
 
                 let needs_projection = {
-                    let logical_len = logical_file_schema.fields().len();
                     let projection_len = projection.len();
                     projection.is_empty()
-                        || projection_len != logical_len
+                        || projection_len != file_column_count
                         || !projection.iter().enumerate().all(|(i, &idx)| i == idx)
                 };
 

@@ -301,6 +301,43 @@ async fn test_basic_reading_alltypes_projection_limit() {
 }
 
 #[tokio::test]
+async fn test_basic_reading_alltypes_projection_subset() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "subset_alltypes", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("subset_alltypes")
+        .await
+        .expect("Table exists")
+        .select_columns(&["boolean", "int8", "int16"])
+        .expect("Projection should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+---------+------+--------+",
+        "| boolean | int8 | int16  |",
+        "+---------+------+--------+",
+        "|         |      |        |",
+        "| true    | 0    | 0      |",
+        "| false   | 1    | 1      |",
+        "| false   | -1   | -1     |",
+        "| true    | 127  | 32767  |",
+        "| true    | -128 | -32768 |",
+        "| true    | 50   | 50     |",
+        "| true    | 51   | 51     |",
+        "| true    | 52   | 52     |",
+        "| false   | 53   | 53     |",
+        "|         |      |        |",
+        "+---------+------+--------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+#[tokio::test]
 async fn test_basic_reading_map_list_types() {
     let ctx = SessionContext::new();
     register_orc_table(&ctx, "map_list", "map_list.snappy.orc")
