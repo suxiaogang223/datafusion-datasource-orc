@@ -21,6 +21,7 @@ use datafusion::assert_batches_eq;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
+use datafusion::functions_aggregate::expr_fn::count;
 use datafusion::prelude::*;
 use datafusion_datasource::file_format::FileFormat;
 use datafusion_orc_extension::OrcFormat;
@@ -320,6 +321,38 @@ async fn test_basic_reading_map_list_types() {
         "+----+-------------------+---------------+-------+",
         "| 1  | {one: 1, zero: 0} | [test, blaze] | blaze |",
         "+----+-------------------+---------------+-------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+#[tokio::test]
+async fn test_basic_reading_alltypes_row_count() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "count_alltypes", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("count_alltypes")
+        .await
+        .expect("Table exists for counting");
+
+    let count_df = df
+        .aggregate(vec![], vec![count(lit(1i64))])
+        .expect("COUNT(*) aggregate should be created");
+
+    let batches = count_df
+        .collect()
+        .await
+        .expect("COUNT(*) should collect successfully");
+
+    let expected = [
+        "+-----------------+",
+        "| count(Int64(1)) |",
+        "+-----------------+",
+        "| 11              |",
+        "+-----------------+",
     ];
 
     assert_batches_eq!(expected, &batches);

@@ -19,6 +19,7 @@
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
+use arrow::record_batch::RecordBatchOptions;
 use datafusion_common::{DataFusionError, Result};
 use datafusion_datasource::file_stream::{FileOpenFuture, FileOpener};
 use datafusion_datasource::PartitionedFile;
@@ -113,7 +114,9 @@ impl FileOpener for OrcOpener {
                 // Check if we need to apply projection
                 // If projection includes all columns, use ProjectionMask::all()
                 // Otherwise, create a projection mask
-                let projection_mask = if projection.len() == root_data_type.children().len()
+                let projection_mask = if projection.is_empty() {
+                    ProjectionMask::roots(root_data_type, std::iter::empty())
+                } else if projection.len() == root_data_type.children().len()
                     && projection.iter().enumerate().all(|(i, &idx)| i == idx)
                 {
                     ProjectionMask::all()
@@ -140,7 +143,8 @@ impl FileOpener for OrcOpener {
                 let needs_projection = {
                     let logical_len = logical_file_schema.fields().len();
                     let projection_len = projection.len();
-                    projection_len != logical_len
+                    projection.is_empty()
+                        || projection_len != logical_len
                         || !projection.iter().enumerate().all(|(i, &idx)| i == idx)
                 };
 
@@ -228,7 +232,14 @@ fn project_batch(
     projection: &[usize],
 ) -> Result<RecordBatch> {
     if projection.is_empty() {
-        return Ok(RecordBatch::new_empty(Arc::clone(logical_schema)));
+        let mut options = RecordBatchOptions::new();
+        options.row_count = Some(batch.num_rows());
+        return RecordBatch::try_new_with_options(Arc::clone(logical_schema), vec![], &options)
+            .map_err(|e| {
+                DataFusionError::External(
+                    format!("Failed to build empty projection batch: {e}").into(),
+                )
+            });
     }
 
     let columns = projection
