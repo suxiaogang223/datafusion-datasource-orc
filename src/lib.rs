@@ -15,22 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! DataFusion ORC Extension
+//! ORC datasource for Apache DataFusion.
 //!
-//! This crate provides ORC (Optimized Row Columnar) file format support
-//! for Apache DataFusion.
+//! This crate provides DataFusion [`FileFormat`] and [`FileSource`] implementations
+//! backed by [`orc-rust`]. It integrates with DataFusion's listing tables and
+//! reads ORC files asynchronously via [`object_store`].
+//!
+//! [`FileFormat`]: datafusion_datasource::file_format::FileFormat
+//! [`FileSource`]: datafusion_datasource::file::FileSource
+//! [`orc-rust`]: https://github.com/datafusion-contrib/orc-rust
+//! [`object_store`]: https://docs.rs/object_store
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod file_format;
 pub mod metadata;
-pub mod opener;
-pub mod predicate;
-pub mod reader;
+pub mod options;
 pub mod source;
-pub mod writer;
+
+mod opener;
+mod predicate;
+mod reader;
+mod writer;
 
 // Re-export main types
 pub use file_format::{OrcFormat, OrcFormatFactory};
+pub use options::{OrcFormatOptions, OrcReadOptions};
+pub use reader::ObjectStoreChunkReader;
 pub use source::OrcSource;

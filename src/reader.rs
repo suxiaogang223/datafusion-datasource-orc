@@ -15,7 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! ORC file reading logic
+//! ORC reader adapters.
+//!
+//! Provides an [`AsyncChunkReader`] implementation backed by `object_store`
+//! so `orc-rust` can read from local or remote object stores.
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;

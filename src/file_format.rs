@@ -15,7 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! [`OrcFormat`]: ORC [`FileFormat`] abstractions
+//! ORC [`FileFormat`] implementations and factory wiring.
+//!
+//! This module provides the entry points DataFusion uses to discover ORC support
+//! via [`FileFormatFactory`] and to build physical plans via [`FileFormat`].
 
 use std::any::Any;
 use std::sync::Arc;
@@ -32,16 +35,26 @@ use futures::TryStreamExt;
 use object_store::ObjectStore;
 
 use crate::metadata::{read_orc_schema, read_orc_statistics};
+use crate::options::OrcFormatOptions;
 use crate::source::OrcSource;
 
-/// Factory struct used to create [`OrcFormat`]
+/// Factory for creating [`OrcFormat`] instances.
 #[derive(Debug, Default)]
-pub struct OrcFormatFactory;
+pub struct OrcFormatFactory {
+    options: Option<OrcFormatOptions>,
+}
 
 impl OrcFormatFactory {
     /// Creates an instance of [`OrcFormatFactory`]
     pub fn new() -> Self {
-        Self
+        Self { options: None }
+    }
+
+    /// Creates an instance of [`OrcFormatFactory`] with default options.
+    pub fn new_with_options(options: OrcFormatOptions) -> Self {
+        Self {
+            options: Some(options),
+        }
     }
 }
 
@@ -49,13 +62,16 @@ impl FileFormatFactory for OrcFormatFactory {
     fn create(
         &self,
         _state: &dyn datafusion_session::Session,
-        _format_options: &std::collections::HashMap<String, String>,
+        format_options: &std::collections::HashMap<String, String>,
     ) -> Result<Arc<dyn FileFormat>> {
-        Ok(Arc::new(OrcFormat))
+        let mut options = self.options.clone().unwrap_or_default();
+        // TODO: plumb DataFusion session defaults once ORC config options exist.
+        options.apply_format_options(format_options)?;
+        Ok(Arc::new(OrcFormat::default().with_options(options)))
     }
 
     fn default(&self) -> Arc<dyn FileFormat> {
-        Arc::new(OrcFormat)
+        Arc::new(OrcFormat::default())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -69,14 +85,27 @@ impl GetExt for OrcFormatFactory {
     }
 }
 
-/// The Apache ORC `FileFormat` implementation
-#[derive(Debug, Default)]
-pub struct OrcFormat;
+/// The Apache ORC [`FileFormat`] implementation.
+#[derive(Debug, Default, Clone)]
+pub struct OrcFormat {
+    options: OrcFormatOptions,
+}
 
 impl OrcFormat {
     /// Construct a new Format with default options
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Override ORC format options.
+    pub fn with_options(mut self, options: OrcFormatOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Return the configured ORC format options.
+    pub fn options(&self) -> &OrcFormatOptions {
+        &self.options
     }
 }
 
@@ -151,7 +180,9 @@ impl FileFormat for OrcFormat {
         // conf.file_schema() returns SchemaRef, we need to convert it to TableSchema
         let file_schema = conf.file_schema();
         let table_schema = TableSchema::from_file_schema(file_schema.clone());
-        let source = Arc::new(OrcSource::new(table_schema));
+        let source = Arc::new(
+            OrcSource::new(table_schema).with_read_options(self.options.read.clone()),
+        );
 
         // Create new FileScanConfig with OrcSource
         let conf = FileScanConfigBuilder::from(conf)
@@ -165,8 +196,11 @@ impl FileFormat for OrcFormat {
     fn file_source(&self) -> Arc<dyn datafusion_datasource::file::FileSource> {
         // Return a default OrcSource
         // The actual schema will be set when create_physical_plan is called
-        Arc::new(OrcSource::new(TableSchema::from_file_schema(Arc::new(
-            arrow::datatypes::Schema::empty(),
-        ))))
+        Arc::new(
+            OrcSource::new(TableSchema::from_file_schema(Arc::new(
+                arrow::datatypes::Schema::empty(),
+            )))
+            .with_read_options(self.options.read.clone()),
+        )
     }
 }

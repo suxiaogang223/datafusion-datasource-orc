@@ -15,7 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! ORC metadata processing
+//! ORC metadata processing utilities.
+//!
+//! This module exposes helpers to read ORC file metadata and derive Arrow
+//! schemas and statistics used by DataFusion.
 
 use arrow::datatypes::SchemaRef;
 use datafusion_common::stats::Precision;
@@ -28,7 +31,7 @@ use std::sync::Arc;
 
 use crate::reader::ObjectStoreChunkReader;
 
-/// Read ORC file metadata and extract schema
+/// Read ORC file metadata and extract an Arrow schema.
 pub async fn read_orc_schema(
     store: &Arc<dyn ObjectStore>,
     object: &ObjectMeta,
@@ -54,7 +57,10 @@ pub async fn read_orc_schema(
     Ok(Arc::new(schema))
 }
 
-/// Read ORC file statistics
+/// Read ORC file statistics.
+///
+/// TODO: Extract column-level statistics (min/max/null counts) once the
+/// underlying ORC metadata exposes them in a stable form.
 pub async fn read_orc_statistics(
     store: &Arc<dyn ObjectStore>,
     object: &ObjectMeta,

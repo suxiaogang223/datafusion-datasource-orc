@@ -219,6 +219,33 @@ df.show().await?;
 
 > **Note**: Core reading functionality is implemented. Currently in Phase 4a: testing and validation. The API may change during development.
 
+### Configuration (Read Path)
+
+```rust
+use datafusion::prelude::*;
+use datafusion_datasource_orc::{OrcFormatFactory, OrcFormatOptions, OrcReadOptions};
+
+let read_options = OrcReadOptions::default()
+    .with_batch_size(16384)
+    .with_pushdown_predicate(true)
+    .with_metadata_size_hint(1_048_576);
+
+let format_options = OrcFormatOptions { read: read_options };
+let orc_factory = OrcFormatFactory::new_with_options(format_options);
+
+let ctx = SessionContext::new();
+ctx.register_file_format("orc", orc_factory);
+```
+
+Supported format options keys (when provided via DataFusion format options map):
+- `orc.batch_size` (usize)
+- `orc.pushdown_predicate` (bool)
+- `orc.metadata_size_hint` (usize)
+
+> **Note**: ORC format options are currently parsed by this crate only. DataFusion
+> does not yet define ORC-specific config options, so keys may change once upstream
+> support lands.
+
 ## Architecture
 
 ### Core Components
@@ -227,6 +254,7 @@ df.show().await?;
 2. **OrcFormatFactory**: Implements `FileFormatFactory` trait, creates format instances
 3. **OrcSource**: Implements `FileSource` trait, provides datasource functionality
 4. **OrcOpener**: Implements `FileOpener` trait, handles file opening and data streams
+5. **OrcReadOptions / OrcFormatOptions**: Read-path configuration for ORC scans
 
 ### Data Flow
 

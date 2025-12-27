@@ -15,7 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! File opening and configuration logic
+//! [`OrcOpener`] for creating ORC `RecordBatch` streams.
+//!
+//! This module is the bridge between DataFusion's file scan configuration and
+//! `orc-rust`'s async reader APIs.
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
@@ -37,8 +40,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::reader::ObjectStoreChunkReader;
 
-/// Implements [`FileOpener`] for an ORC file
-pub struct OrcOpener {
+/// Implements [`FileOpener`] for an ORC file.
+#[allow(dead_code)]
+pub(crate) struct OrcOpener {
     /// Execution partition index
     pub partition_index: usize,
     /// Column indexes in `table_schema` needed by the query
@@ -55,7 +59,8 @@ pub struct OrcOpener {
     pub metrics: ExecutionPlanMetricsSet,
     /// ObjectStore for reading files
     pub object_store: Arc<dyn ObjectStore>,
-    /// Optional predicate for stripe-level filtering
+    /// Optional predicate for stripe-level filtering.
+    /// TODO: Add row-level filtering when supported by orc-rust.
     pub predicate: Option<OrcPredicate>,
 }
 

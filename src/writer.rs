@@ -15,7 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! ORC file writing logic
+//! ORC file writing logic.
+//!
+//! TODO: Implement Arrow `RecordBatch` to ORC writing and expose a DataFusion
+//! `FileSink` once orc-rust writer APIs are available.
 
-// This module will contain the implementation for writing Arrow RecordBatches
-// to ORC format files
+// TODO: add writer implementation.

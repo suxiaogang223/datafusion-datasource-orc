@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Predicate conversion from DataFusion PhysicalExpr to orc-rust Predicate
+//! Predicate conversion from DataFusion physical expressions to `orc-rust`.
 //!
 //! This module provides utilities to convert DataFusion's physical expressions
-//! into orc-rust predicates that can be used for stripe-level and row-group
-//! filtering during ORC file reads.
+//! into `orc-rust` predicates that can be used for stripe-level filtering.
+//! TODO: Support additional expression types (e.g. IN lists, LIKE, and nested
+//! fields) as the ORC reader surface expands.
 
 use arrow::datatypes::Schema;
 use datafusion_common::ScalarValue;
