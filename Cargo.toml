@@ -16,14 +16,14 @@
 # under the License.
 
 [package]
-name = "datafusion-orc-extension"
+name = "datafusion-datasource-orc"
 version = "0.1.0"
 edition = "2021"
 authors = ["suxiaogang223 <suxiaogang223@icloud.com>"]
 license = "Apache-2.0"
 description = "ORC file format support for Apache DataFusion"
 readme = "README.md"
-repository = "https://github.com/suxiaogang223/datafusion-orc-extension"
+repository = "https://github.com/suxiaogang223/datafusion-datasource-orc"
 rust-version = "1.73"
 
 [package.metadata.docs.rs]
@@ -72,5 +72,5 @@ datafusion = { version = "51.0.0", default-features = false }
 unused = "warn"
 
 [lib]
-name = "datafusion_orc_extension"
+name = "datafusion_datasource_orc"
 path = "src/lib.rs"

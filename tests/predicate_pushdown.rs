@@ -25,7 +25,7 @@ use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
 use datafusion::prelude::*;
-use datafusion_orc_extension::OrcFormat;
+use datafusion_datasource_orc::OrcFormat;
 use std::path::PathBuf;
 use std::sync::Arc;
 

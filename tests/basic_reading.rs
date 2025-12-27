@@ -24,7 +24,7 @@ use datafusion::datasource::listing::{
 use datafusion::functions_aggregate::expr_fn::count;
 use datafusion::prelude::*;
 use datafusion_datasource::file_format::FileFormat;
-use datafusion_orc_extension::OrcFormat;
+use datafusion_datasource_orc::OrcFormat;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectStorePath;
 use object_store::ObjectStore;

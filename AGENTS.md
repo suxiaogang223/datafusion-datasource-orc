@@ -4,7 +4,7 @@ This file provides guidance to coding agents collaborating on this repository.
 
 ## Project Overview
 
-`datafusion-orc-extension` adds Apache ORC file-format support to Apache DataFusion. The extension includes:
+`datafusion-datasource-orc` adds Apache ORC file-format support to Apache DataFusion. The extension includes:
 
 - DataFusion `FileFormat`, `FileSource`, and `FileOpener` implementations.
 - Async ORC readers built on top of [`orc-rust`](https://github.com/datafusion-contrib/orc-rust).

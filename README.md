@@ -1,4 +1,4 @@
-# DataFusion ORC Extension
+# DataFusion ORC Datasource
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.73%2B-orange.svg)](https://www.rust-lang.org/)
@@ -7,7 +7,7 @@ A DataFusion extension providing ORC (Optimized Row Columnar) file format suppor
 
 ## Overview
 
-`datafusion-orc-extension` is an independent extension project that adds comprehensive ORC file format support to the DataFusion query engine. Built on top of [orc-rust](https://github.com/datafusion-contrib/orc-rust), it provides functionality similar to DataFusion's Parquet support.
+`datafusion-datasource-orc` is an independent extension project that adds comprehensive ORC file format support to the DataFusion query engine. Built on top of [orc-rust](https://github.com/datafusion-contrib/orc-rust), it provides functionality similar to DataFusion's Parquet support.
 
 ## Status
 
@@ -138,7 +138,7 @@ A DataFusion extension providing ORC (Optimized Row Columnar) file format suppor
 ## Project Structure
 
 ```
-datafusion-orc-extension/
+datafusion-datasource-orc/
 ├── Cargo.toml              # Project configuration and dependencies
 ├── README.md               # Project documentation
 ├── IMPLEMENTATION_PLAN.md  # Detailed implementation plan
@@ -181,14 +181,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-datafusion-orc-extension = { path = "../datafusion-orc-extension" }
+datafusion-datasource-orc = { path = "../datafusion-datasource-orc" }
 ```
 
 Or from git (when available):
 
 ```toml
 [dependencies]
-datafusion-orc-extension = { git = "https://github.com/your-org/datafusion-orc-extension" }
+datafusion-datasource-orc = { git = "https://github.com/your-org/datafusion-datasource-orc" }
 ```
 
 ## Usage
@@ -196,7 +196,7 @@ datafusion-orc-extension = { git = "https://github.com/your-org/datafusion-orc-e
 ### Basic Example
 
 ```rust
-use datafusion_orc_extension::OrcFormatFactory;
+use datafusion_datasource_orc::OrcFormatFactory;
 use datafusion::prelude::*;
 
 // Create SessionContext
