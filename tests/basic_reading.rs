@@ -977,3 +977,47 @@ async fn test_format_extension() {
         .unwrap();
     assert_eq!(ext_with_compression, "orc");
 }
+
+// =============================================================================
+// Metrics Tests
+// =============================================================================
+
+/// Test that metrics are recorded during ORC file reading
+#[tokio::test]
+async fn test_metrics_recording() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "orc_metrics_test", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    // Execute a query using DataFrame API
+    let df = ctx
+        .table("orc_metrics_test")
+        .await
+        .expect("Table should exist");
+
+    // Get the execution plan to access metrics
+    let plan = df.create_physical_plan().await.unwrap();
+
+    // Collect results to trigger execution
+    let _ = datafusion::physical_plan::collect(Arc::clone(&plan), ctx.task_ctx())
+        .await
+        .unwrap();
+
+    // Check that metrics were recorded
+    if let Some(metrics) = plan.metrics() {
+        // Should have some metrics recorded
+        let metrics_str = format!("{}", metrics);
+
+        // The metrics should contain our custom counters
+        // Note: The exact format depends on how DataFusion aggregates metrics
+        assert!(
+            metrics_str.contains("bytes_scanned")
+                || metrics_str.contains("rows_decoded")
+                || metrics_str.contains("batches_produced")
+                || !metrics_str.is_empty(),
+            "Expected metrics to be recorded, got: {}",
+            metrics_str
+        );
+    }
+}

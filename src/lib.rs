@@ -165,6 +165,7 @@
 
 pub mod file_format;
 pub mod metadata;
+pub mod metrics;
 pub mod options;
 pub mod source;
 
@@ -175,6 +176,7 @@ mod writer;
 
 // Re-export main types
 pub use file_format::{OrcFormat, OrcFormatFactory};
+pub use metrics::OrcFileMetrics;
 pub use options::{OrcFormatOptions, OrcReadOptions};
 pub use reader::ObjectStoreChunkReader;
 pub use source::OrcSource;

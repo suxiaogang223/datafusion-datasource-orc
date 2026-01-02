@@ -37,7 +37,9 @@ use orc_rust::projection::ProjectionMask;
 use orc_rust::schema::RootDataType;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
+use crate::metrics::OrcFileMetrics;
 use crate::reader::ObjectStoreChunkReader;
 
 /// Implements [`FileOpener`] for an ORC file.
@@ -103,15 +105,27 @@ impl FileOpener for OrcOpener {
         let logical_file_schema = Arc::clone(&self.logical_file_schema);
         let predicate = self.predicate.clone();
 
+        // Create file-level metrics
+        let file_metrics =
+            OrcFileMetrics::new(self.partition_index, file_location.as_ref(), &self.metrics);
+
+        // Record file size for scan efficiency calculation
+        file_metrics.file_size.add(file_size as usize);
+
         let future: BoxFuture<'static, Result<BoxStream<'static, Result<RecordBatch>>>> =
             Box::pin(async move {
-                // Create ArrowStreamReader for async reading
-                // We need to create a new reader since try_new_async takes ownership
+                // Create ArrowStreamReader for async reading with metrics
                 let stream_reader =
-                    ObjectStoreChunkReader::with_size(object_store, file_location, file_size);
+                    ObjectStoreChunkReader::with_size(object_store, file_location, file_size)
+                        .with_metrics(
+                            file_metrics.bytes_scanned.clone(),
+                            file_metrics.io_requests.clone(),
+                        );
+
+                // Record metadata load time
+                let metadata_timer = file_metrics.metadata_load_time.timer();
 
                 // Build the async reader using ArrowReaderBuilder
-                // try_new_async takes ownership of the reader
                 let mut arrow_reader_builder = ArrowReaderBuilder::try_new_async(stream_reader)
                     .await
                     .map_err(|e| {
@@ -119,6 +133,8 @@ impl FileOpener for OrcOpener {
                             format!("Failed to create ORC reader builder: {}", e).into(),
                         )
                     })?;
+
+                metadata_timer.done();
 
                 // Apply projection if not all columns are needed
                 let (projection_mask, projection_map, file_column_count) = {
@@ -144,11 +160,26 @@ impl FileOpener for OrcOpener {
                 // Build the async stream reader
                 let arrow_stream_reader = arrow_reader_builder.build_async();
 
-                // Convert ArrowError to DataFusionError
-                let projected_stream = arrow_stream_reader.map(|result| {
-                    result.map_err(|e| {
+                // Clone metrics for the stream closure
+                let decode_time = file_metrics.decode_time.clone();
+                let rows_decoded = file_metrics.rows_decoded.clone();
+                let batches_produced = file_metrics.batches_produced.clone();
+
+                // Convert ArrowError to DataFusionError and record metrics
+                let projected_stream = arrow_stream_reader.map(move |result| {
+                    let decode_start = Instant::now();
+                    let mapped_result = result.map_err(|e| {
                         DataFusionError::External(format!("Failed to read ORC batch: {}", e).into())
-                    })
+                    });
+
+                    // Record decode time and batch statistics
+                    if let Ok(ref batch) = mapped_result {
+                        decode_time.add_elapsed(decode_start);
+                        rows_decoded.add(batch.num_rows());
+                        batches_produced.add(1);
+                    }
+
+                    mapped_result
                 });
 
                 let needs_projection = should_apply_batch_projection(

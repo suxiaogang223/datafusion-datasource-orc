@@ -21,17 +21,30 @@
 //! so `orc-rust` can read from local or remote object stores.
 
 use bytes::Bytes;
+use datafusion_physical_plan::metrics::Count;
 use futures_util::future::BoxFuture;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use orc_rust::reader::AsyncChunkReader;
 use std::sync::Arc;
 
-/// Adapter to convert ObjectStore to AsyncChunkReader for orc-rust
+/// Adapter to convert ObjectStore to AsyncChunkReader for orc-rust.
+///
+/// This adapter bridges the gap between DataFusion's `ObjectStore` abstraction
+/// and `orc-rust`'s `AsyncChunkReader` trait, enabling ORC files to be read
+/// from any supported object store (local filesystem, S3, GCS, Azure, etc.).
+///
+/// When metrics are provided, it automatically tracks:
+/// - `bytes_scanned`: Total bytes read from the object store
+/// - `io_requests`: Number of I/O operations performed
 pub struct ObjectStoreChunkReader {
     store: Arc<dyn ObjectStore>,
     path: Path,
     file_size: Option<u64>,
+    /// Optional counter for tracking bytes scanned
+    bytes_scanned: Option<Count>,
+    /// Optional counter for tracking I/O requests
+    io_requests: Option<Count>,
 }
 
 impl ObjectStoreChunkReader {
@@ -41,6 +54,8 @@ impl ObjectStoreChunkReader {
             store,
             path,
             file_size: None,
+            bytes_scanned: None,
+            io_requests: None,
         }
     }
 
@@ -50,6 +65,35 @@ impl ObjectStoreChunkReader {
             store,
             path,
             file_size: Some(size),
+            bytes_scanned: None,
+            io_requests: None,
+        }
+    }
+
+    /// Attach metrics counters to track I/O statistics.
+    ///
+    /// When metrics are attached, every read operation will automatically
+    /// update the `bytes_scanned` and `io_requests` counters.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use datafusion_datasource_orc::metrics::OrcFileMetrics;
+    ///
+    /// let metrics = OrcFileMetrics::new(0, "file.orc", &metrics_set);
+    /// let reader = ObjectStoreChunkReader::with_size(store, path, size)
+    ///     .with_metrics(metrics.bytes_scanned.clone(), metrics.io_requests.clone());
+    /// ```
+    pub fn with_metrics(mut self, bytes_scanned: Count, io_requests: Count) -> Self {
+        self.bytes_scanned = Some(bytes_scanned);
+        self.io_requests = Some(io_requests);
+        self
+    }
+
+    /// Record an I/O request (if metrics are attached)
+    fn record_io_request(&self) {
+        if let Some(ref counter) = self.io_requests {
+            counter.add(1);
         }
     }
 }
@@ -61,10 +105,12 @@ impl AsyncChunkReader for ObjectStoreChunkReader {
                 Ok(size)
             } else {
                 // Fetch metadata to get file size
+                self.record_io_request();
                 let meta =
                     self.store.head(&self.path).await.map_err(|e| {
                         std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
                     })?;
+                self.file_size = Some(meta.size as u64);
                 Ok(meta.size as u64)
             }
         })
@@ -77,13 +123,26 @@ impl AsyncChunkReader for ObjectStoreChunkReader {
     ) -> BoxFuture<'_, std::io::Result<Bytes>> {
         let store = Arc::clone(&self.store);
         let path = self.path.clone();
+        let bytes_scanned = self.bytes_scanned.clone();
+        let io_requests = self.io_requests.clone();
 
         Box::pin(async move {
+            // Record I/O request
+            if let Some(ref counter) = io_requests {
+                counter.add(1);
+            }
+
             let range = offset_from_start..(offset_from_start + length);
             let bytes = store
                 .get_range(&path, range)
                 .await
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+            // Record bytes read
+            if let Some(ref counter) = bytes_scanned {
+                counter.add(bytes.len());
+            }
+
             Ok(bytes)
         })
     }
@@ -179,5 +238,42 @@ mod tests {
         // Should return error when file doesn't exist
         let result = reader.len().await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_with_metrics() {
+        use datafusion_physical_plan::metrics::{ExecutionPlanMetricsSet, MetricBuilder};
+
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("metrics_test.bin");
+
+        // Upload test data
+        let test_data = bytes::Bytes::from(vec![0u8; 100]);
+        store
+            .put(&path, test_data.into())
+            .await
+            .expect("Failed to upload test data");
+
+        // Create metrics
+        let metrics_set = ExecutionPlanMetricsSet::new();
+        let bytes_scanned = MetricBuilder::new(&metrics_set).counter("bytes_scanned", 0);
+        let io_requests = MetricBuilder::new(&metrics_set).counter("io_requests", 0);
+
+        let mut reader = ObjectStoreChunkReader::with_size(Arc::clone(&store), path, 100)
+            .with_metrics(bytes_scanned.clone(), io_requests.clone());
+
+        // Initial state
+        assert_eq!(bytes_scanned.value(), 0);
+        assert_eq!(io_requests.value(), 0);
+
+        // Read some bytes
+        let _ = reader.get_bytes(0, 50).await.unwrap();
+        assert_eq!(bytes_scanned.value(), 50);
+        assert_eq!(io_requests.value(), 1);
+
+        // Read more bytes
+        let _ = reader.get_bytes(50, 30).await.unwrap();
+        assert_eq!(bytes_scanned.value(), 80);
+        assert_eq!(io_requests.value(), 2);
     }
 }
