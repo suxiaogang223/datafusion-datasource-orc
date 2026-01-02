@@ -115,3 +115,114 @@ fn parse_usize_option(key: &str, value: &str) -> Result<usize> {
         ))
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_orc_read_options_default() {
+        let options = OrcReadOptions::default();
+        assert_eq!(options.batch_size, None);
+        assert!(options.pushdown_predicate);
+        assert_eq!(options.metadata_size_hint, None);
+    }
+
+    #[test]
+    fn test_orc_read_options_builder() {
+        let options = OrcReadOptions::default()
+            .with_batch_size(4096)
+            .with_pushdown_predicate(false)
+            .with_metadata_size_hint(1024);
+
+        assert_eq!(options.batch_size, Some(4096));
+        assert!(!options.pushdown_predicate);
+        assert_eq!(options.metadata_size_hint, Some(1024));
+    }
+
+    #[test]
+    fn test_orc_format_options_default() {
+        let options = OrcFormatOptions::default();
+        assert_eq!(options.read.batch_size, None);
+        assert!(options.read.pushdown_predicate);
+    }
+
+    #[test]
+    fn test_apply_format_options_batch_size() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.batch_size".to_string(), "8192".to_string());
+
+        options.apply_format_options(&format_opts).unwrap();
+        assert_eq!(options.read.batch_size, Some(8192));
+    }
+
+    #[test]
+    fn test_apply_format_options_pushdown_predicate() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.pushdown_predicate".to_string(), "false".to_string());
+
+        options.apply_format_options(&format_opts).unwrap();
+        assert!(!options.read.pushdown_predicate);
+    }
+
+    #[test]
+    fn test_apply_format_options_metadata_size_hint() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.metadata_size_hint".to_string(), "1048576".to_string());
+
+        options.apply_format_options(&format_opts).unwrap();
+        assert_eq!(options.read.metadata_size_hint, Some(1048576));
+    }
+
+    #[test]
+    fn test_apply_format_options_invalid_batch_size() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.batch_size".to_string(), "not_a_number".to_string());
+
+        let result = options.apply_format_options(&format_opts);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid value for orc.batch_size"));
+    }
+
+    #[test]
+    fn test_apply_format_options_invalid_bool() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.pushdown_predicate".to_string(), "maybe".to_string());
+
+        let result = options.apply_format_options(&format_opts);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid value for orc.pushdown_predicate"));
+    }
+
+    #[test]
+    fn test_apply_format_options_multiple() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.batch_size".to_string(), "16384".to_string());
+        format_opts.insert("orc.pushdown_predicate".to_string(), "true".to_string());
+        format_opts.insert("orc.metadata_size_hint".to_string(), "2097152".to_string());
+
+        options.apply_format_options(&format_opts).unwrap();
+        assert_eq!(options.read.batch_size, Some(16384));
+        assert!(options.read.pushdown_predicate);
+        assert_eq!(options.read.metadata_size_hint, Some(2097152));
+    }
+
+    #[test]
+    fn test_apply_format_options_unknown_key() {
+        let mut options = OrcFormatOptions::default();
+        let mut format_opts = HashMap::new();
+        format_opts.insert("orc.unknown_option".to_string(), "value".to_string());
+
+        // Unknown options should be silently ignored for now
+        let result = options.apply_format_options(&format_opts);
+        assert!(result.is_ok());
+    }
+}

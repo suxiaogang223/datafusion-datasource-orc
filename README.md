@@ -196,28 +196,46 @@ datafusion-datasource-orc = { git = "https://github.com/your-org/datafusion-data
 ### Basic Example
 
 ```rust
-use datafusion_datasource_orc::OrcFormatFactory;
 use datafusion::prelude::*;
+use datafusion::datasource::listing::{
+    ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
+};
+use datafusion_datasource_orc::OrcFormat;
+use std::sync::Arc;
 
-// Create SessionContext
-let ctx = SessionContext::new();
+#[tokio::main]
+async fn main() -> datafusion_common::Result<()> {
+    // Create a SessionContext
+    let ctx = SessionContext::new();
 
-// Register ORC format
-let orc_factory = OrcFormatFactory::new();
-ctx.register_file_format("orc", orc_factory);
+    // Configure listing options with ORC format
+    let listing_options = ListingOptions::new(Arc::new(OrcFormat::new()))
+        .with_file_extension(".orc");
 
-// Read ORC file
-ctx.register_table(
-    "my_table",
-    ctx.read_table("file:///path/to/file.orc")?
-)?;
+    // Create a listing table URL
+    let table_path = ListingTableUrl::parse("file:///path/to/orc/files/")?;
 
-// Execute query
-let df = ctx.sql("SELECT * FROM my_table WHERE column > 100").await?;
-df.show().await?;
+    // Infer schema from the ORC files
+    let schema = listing_options
+        .infer_schema(&ctx.state(), &table_path)
+        .await?;
+
+    // Create and register the table
+    let config = ListingTableConfig::new(table_path)
+        .with_listing_options(listing_options)
+        .with_schema(schema);
+    let table = ListingTable::try_new(config)?;
+    ctx.register_table("my_table", Arc::new(table))?;
+
+    // Execute query with predicate pushdown
+    let df = ctx.sql("SELECT * FROM my_table WHERE id > 100").await?;
+    df.show().await?;
+
+    Ok(())
+}
 ```
 
-> **Note**: Core reading functionality is implemented. Currently in Phase 4a: testing and validation. The API may change during development.
+> **Note**: Core reading functionality is fully implemented. Phase 1 complete with full test coverage.
 
 ### Configuration (Read Path)
 

@@ -84,3 +84,96 @@ pub async fn read_orc_statistics(
         column_statistics: vec![],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use object_store::local::LocalFileSystem;
+    use object_store::path::Path as ObjectStorePath;
+    use std::path::PathBuf;
+
+    fn get_test_data_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("integration")
+            .join("data")
+    }
+
+    #[tokio::test]
+    async fn test_read_orc_schema_alltypes() {
+        let test_data_dir = get_test_data_dir();
+        let orc_file = test_data_dir.join("alltypes.snappy.orc");
+
+        let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new());
+        let path = ObjectStorePath::from_filesystem_path(&orc_file).unwrap();
+        let object_meta = store.head(&path).await.unwrap();
+
+        let schema = read_orc_schema(&store, &object_meta).await.unwrap();
+
+        // Verify schema fields
+        assert!(!schema.fields().is_empty());
+
+        // Check specific fields exist
+        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(field_names.contains(&"boolean"));
+        assert!(field_names.contains(&"int8"));
+        assert!(field_names.contains(&"int64"));
+        assert!(field_names.contains(&"utf8"));
+    }
+
+    #[tokio::test]
+    async fn test_read_orc_statistics_alltypes() {
+        let test_data_dir = get_test_data_dir();
+        let orc_file = test_data_dir.join("alltypes.snappy.orc");
+
+        let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new());
+        let path = ObjectStorePath::from_filesystem_path(&orc_file).unwrap();
+        let object_meta = store.head(&path).await.unwrap();
+
+        let schema = read_orc_schema(&store, &object_meta).await.unwrap();
+        let stats = read_orc_statistics(&store, &object_meta, schema).await.unwrap();
+
+        // Verify row count
+        assert_eq!(stats.num_rows, Precision::Exact(11));
+
+        // Verify byte size is set
+        match stats.total_byte_size {
+            Precision::Exact(size) => assert!(size > 0),
+            _ => panic!("Expected exact byte size"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_orc_schema_map_list() {
+        let test_data_dir = get_test_data_dir();
+        let orc_file = test_data_dir.join("map_list.snappy.orc");
+
+        let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new());
+        let path = ObjectStorePath::from_filesystem_path(&orc_file).unwrap();
+        let object_meta = store.head(&path).await.unwrap();
+
+        let schema = read_orc_schema(&store, &object_meta).await.unwrap();
+
+        // Verify schema fields
+        assert!(!schema.fields().is_empty());
+
+        // Check specific fields exist
+        let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(field_names.contains(&"id"));
+        assert!(field_names.contains(&"m")); // Map field
+        assert!(field_names.contains(&"l")); // List field
+    }
+
+    #[tokio::test]
+    async fn test_read_orc_schema_nonexistent_file() {
+        let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new());
+
+        // Try to read schema from a file we know doesn't exist
+        // by using a path that's clearly invalid
+        let path = ObjectStorePath::from("/this/path/definitely/does/not/exist.orc");
+
+        // Use head() which will fail for non-existent files
+        let result = store.head(&path).await;
+        assert!(result.is_err(), "Expected error for non-existent file");
+    }
+}

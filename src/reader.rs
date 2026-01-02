@@ -88,3 +88,96 @@ impl AsyncChunkReader for ObjectStoreChunkReader {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use object_store::memory::InMemory;
+    use orc_rust::reader::AsyncChunkReader;
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_new() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("test.orc");
+        let reader = ObjectStoreChunkReader::new(Arc::clone(&store), path.clone());
+
+        assert!(reader.file_size.is_none());
+        assert_eq!(reader.path, path);
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_with_size() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("test.orc");
+        let reader = ObjectStoreChunkReader::with_size(Arc::clone(&store), path.clone(), 1024);
+
+        assert_eq!(reader.file_size, Some(1024));
+        assert_eq!(reader.path, path);
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_len_with_known_size() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("test.orc");
+        let mut reader = ObjectStoreChunkReader::with_size(store, path, 2048);
+
+        let len = reader.len().await.unwrap();
+        assert_eq!(len, 2048);
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_get_bytes() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("test_file.bin");
+
+        // Upload test data
+        let test_data = bytes::Bytes::from(vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        store
+            .put(&path, test_data.clone().into())
+            .await
+            .expect("Failed to upload test data");
+
+        let mut reader =
+            ObjectStoreChunkReader::with_size(Arc::clone(&store), path, test_data.len() as u64);
+
+        // Read a portion of the data
+        let bytes = reader.get_bytes(2, 4).await.unwrap();
+        assert_eq!(bytes.as_ref(), &[2, 3, 4, 5]);
+
+        // Read from the beginning
+        let bytes = reader.get_bytes(0, 3).await.unwrap();
+        assert_eq!(bytes.as_ref(), &[0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_len_fetch_metadata() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("metadata_test.bin");
+
+        // Upload test data
+        let test_data = bytes::Bytes::from(vec![0u8; 512]);
+        store
+            .put(&path, test_data.into())
+            .await
+            .expect("Failed to upload test data");
+
+        // Create reader without known size
+        let mut reader = ObjectStoreChunkReader::new(Arc::clone(&store), path);
+
+        // Should fetch metadata to get size
+        let len = reader.len().await.unwrap();
+        assert_eq!(len, 512);
+    }
+
+    #[tokio::test]
+    async fn test_object_store_chunk_reader_file_not_found() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let path = Path::from("nonexistent.orc");
+
+        let mut reader = ObjectStoreChunkReader::new(store, path);
+
+        // Should return error when file doesn't exist
+        let result = reader.len().await;
+        assert!(result.is_err());
+    }
+}
