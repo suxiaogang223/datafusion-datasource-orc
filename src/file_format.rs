@@ -180,9 +180,8 @@ impl FileFormat for OrcFormat {
         // conf.file_schema() returns SchemaRef, we need to convert it to TableSchema
         let file_schema = conf.file_schema();
         let table_schema = TableSchema::from_file_schema(file_schema.clone());
-        let source = Arc::new(
-            OrcSource::new(table_schema).with_read_options(self.options.read.clone()),
-        );
+        let source =
+            Arc::new(OrcSource::new(table_schema).with_read_options(self.options.read.clone()));
 
         // Create new FileScanConfig with OrcSource
         let conf = FileScanConfigBuilder::from(conf)

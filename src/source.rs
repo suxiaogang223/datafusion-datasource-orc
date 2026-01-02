@@ -37,18 +37,16 @@ use datafusion_datasource::file_scan_config::FileScanConfig;
 use datafusion_datasource::file_stream::FileOpener;
 use datafusion_datasource::TableSchema;
 use datafusion_physical_expr::conjunction;
-use datafusion_physical_expr_common::physical_expr::PhysicalExpr;
 use datafusion_physical_expr_common::physical_expr::fmt_sql;
-use datafusion_physical_plan::filter_pushdown::{
-    FilterPushdownPropagation, PushedDown,
-};
+use datafusion_physical_expr_common::physical_expr::PhysicalExpr;
+use datafusion_physical_plan::filter_pushdown::{FilterPushdownPropagation, PushedDown};
 use datafusion_physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion_physical_plan::DisplayFormatType;
 use object_store::ObjectStore;
 use orc_rust::predicate::Predicate as OrcPredicate;
 
-use crate::options::OrcReadOptions;
 use crate::opener::OrcOpener;
+use crate::options::OrcReadOptions;
 use crate::predicate::convert_physical_expr_to_predicate;
 
 const DEFAULT_BATCH_SIZE: usize = 8192;
@@ -260,16 +258,13 @@ impl FileSource for OrcSource {
         &self,
         filters: Vec<Arc<dyn PhysicalExpr>>,
         _config: &ConfigOptions,
-    ) -> datafusion_common::Result<
-        FilterPushdownPropagation<Arc<dyn FileSource>>,
-    > {
+    ) -> datafusion_common::Result<FilterPushdownPropagation<Arc<dyn FileSource>>> {
         let file_schema = self.table_schema.file_schema();
         let total_filters = filters.len();
         let mut supported = Vec::new();
 
         for filter in filters {
-            if convert_physical_expr_to_predicate(&filter, file_schema.as_ref()).is_some()
-            {
+            if convert_physical_expr_to_predicate(&filter, file_schema.as_ref()).is_some() {
                 supported.push(filter);
             }
         }
@@ -286,12 +281,11 @@ impl FileSource for OrcSource {
         source.set_predicate(conjunction(supported));
         let source = Arc::new(source);
 
-        Ok(
-            FilterPushdownPropagation::with_parent_pushdown_result(
-                vec![PushedDown::No; total_filters],
-            )
-            .with_updated_node(source),
-        )
+        Ok(FilterPushdownPropagation::with_parent_pushdown_result(vec![
+            PushedDown::No;
+            total_filters
+        ])
+        .with_updated_node(source))
     }
 
     /// Returns the filter expression that will be applied during the file scan.

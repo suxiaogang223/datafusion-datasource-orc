@@ -66,6 +66,7 @@ itertools = "0.14"
 [dev-dependencies]
 # Test utilities
 datafusion = { version = "51.0.0", default-features = false }
+tempfile = "3.20"
 
 # TODO: Remove this once we have a proper workspace setup
 [lints.rust]

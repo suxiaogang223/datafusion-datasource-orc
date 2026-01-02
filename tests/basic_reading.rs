@@ -21,10 +21,11 @@ use datafusion::assert_batches_eq;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
-use datafusion::functions_aggregate::expr_fn::count;
+use datafusion::functions_aggregate::expr_fn::{count, max, min};
 use datafusion::prelude::*;
+use datafusion_common::stats::Precision;
 use datafusion_datasource::file_format::FileFormat;
-use datafusion_datasource_orc::OrcFormat;
+use datafusion_datasource_orc::{OrcFormat, OrcFormatOptions, OrcReadOptions};
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectStorePath;
 use object_store::ObjectStore;
@@ -125,6 +126,16 @@ async fn register_orc_table(
     table_name: &str,
     file_name: &str,
 ) -> datafusion_common::Result<()> {
+    register_orc_table_with_options(ctx, table_name, file_name, OrcFormat::new()).await
+}
+
+/// Register an ORC file as a table with custom format options
+async fn register_orc_table_with_options(
+    ctx: &SessionContext,
+    table_name: &str,
+    file_name: &str,
+    format: OrcFormat,
+) -> datafusion_common::Result<()> {
     let file_path = get_test_data_dir().join(file_name);
     let table_path = ListingTableUrl::parse(
         file_path
@@ -132,8 +143,7 @@ async fn register_orc_table(
             .expect("Failed to convert path to string"),
     )?;
 
-    let listing_options =
-        ListingOptions::new(Arc::new(OrcFormat::new())).with_file_extension(".orc");
+    let listing_options = ListingOptions::new(Arc::new(format)).with_file_extension(".orc");
 
     let session_state = ctx.state();
     let schema = listing_options
@@ -430,4 +440,540 @@ async fn test_basic_reading_alltypes_row_count() {
     ];
 
     assert_batches_eq!(expected, &batches);
+}
+
+// =============================================================================
+// Error Handling Tests
+// =============================================================================
+
+/// Test reading from a non-existent file
+#[tokio::test]
+async fn test_error_nonexistent_file() {
+    let object_store = create_test_object_store();
+    let nonexistent_path = ObjectStorePath::from("/definitely/nonexistent/path/file.orc");
+
+    // head() should fail for non-existent file
+    let result = object_store.head(&nonexistent_path).await;
+    assert!(result.is_err(), "Expected error for non-existent file");
+}
+
+/// Test schema inference with non-existent file path behavior
+#[tokio::test]
+async fn test_error_schema_inference_invalid_path() {
+    let ctx = SessionContext::new();
+
+    let result = ListingTableUrl::parse("file:///nonexistent/definitely/not/here/path/");
+
+    if let Ok(table_path) = result {
+        let listing_options =
+            ListingOptions::new(Arc::new(OrcFormat::new())).with_file_extension(".orc");
+
+        let session_state = ctx.state();
+        let schema_result = listing_options
+            .infer_schema(&session_state, &table_path)
+            .await;
+
+        // DataFusion returns an empty schema for non-existent paths
+        match schema_result {
+            Ok(schema) => {
+                assert!(
+                    schema.fields().is_empty(),
+                    "Expected empty schema for non-existent path"
+                );
+            }
+            Err(_) => {
+                // Error is also acceptable
+            }
+        }
+    }
+}
+
+/// Test reading from a directory with only non-ORC files
+#[tokio::test]
+async fn test_no_orc_files_returns_empty_schema() {
+    let ctx = SessionContext::new();
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let fake_file = temp_dir.path().join("fake.txt");
+    std::fs::write(&fake_file, b"not an orc file").expect("Failed to write fake file");
+
+    let table_path = ListingTableUrl::parse(temp_dir.path().to_str().expect("path to string"))
+        .expect("parse url");
+
+    let listing_options =
+        ListingOptions::new(Arc::new(OrcFormat::new())).with_file_extension(".orc");
+
+    let session_state = ctx.state();
+    let schema_result = listing_options
+        .infer_schema(&session_state, &table_path)
+        .await;
+
+    match schema_result {
+        Ok(schema) => {
+            assert!(
+                schema.fields().is_empty(),
+                "Expected empty schema when no ORC files found"
+            );
+        }
+        Err(_) => {
+            // Error is also acceptable behavior
+        }
+    }
+}
+
+// =============================================================================
+// Configuration Options Tests
+// =============================================================================
+
+/// Test custom batch size configuration
+#[tokio::test]
+async fn test_config_custom_batch_size() {
+    let ctx = SessionContext::new();
+
+    let read_options = OrcReadOptions::default().with_batch_size(2);
+    let format_options = OrcFormatOptions { read: read_options };
+    let format = OrcFormat::new().with_options(format_options);
+
+    register_orc_table_with_options(&ctx, "small_batch", "alltypes.snappy.orc", format)
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("small_batch")
+        .await
+        .expect("Table exists")
+        .select_columns(&["int8"])
+        .expect("Projection should succeed")
+        .filter(col("int8").eq(lit(50i8)))
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = ["+------+", "| int8 |", "+------+", "| 50   |", "+------+"];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+/// Test with predicate pushdown disabled
+#[tokio::test]
+async fn test_config_predicate_pushdown_disabled() {
+    let ctx = SessionContext::new();
+
+    let read_options = OrcReadOptions::default().with_pushdown_predicate(false);
+    let format_options = OrcFormatOptions { read: read_options };
+    let format = OrcFormat::new().with_options(format_options);
+
+    assert!(!format.options().read.pushdown_predicate);
+
+    register_orc_table_with_options(&ctx, "no_pushdown", "alltypes.snappy.orc", format)
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("no_pushdown")
+        .await
+        .expect("Table exists")
+        .select_columns(&["int8", "utf8"])
+        .expect("Projection should succeed")
+        .filter(col("int8").gt(lit(51i8)))
+        .expect("Filter should succeed")
+        .sort(vec![col("int8").sort(true, true)])
+        .expect("Sort should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+------+----------+",
+        "| int8 | utf8     |",
+        "+------+----------+",
+        "| 52   | 鈴原希実 |",
+        "| 53   | 🤔       |",
+        "| 127  | encode   |",
+        "+------+----------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+/// Test metadata size hint configuration
+#[tokio::test]
+async fn test_config_metadata_size_hint() {
+    let read_options = OrcReadOptions::default().with_metadata_size_hint(1024 * 1024);
+    let format_options = OrcFormatOptions { read: read_options };
+    let format = OrcFormat::new().with_options(format_options);
+
+    assert_eq!(format.options().read.metadata_size_hint, Some(1024 * 1024));
+}
+
+// =============================================================================
+// Statistics Tests
+// =============================================================================
+
+/// Test that statistics are correctly extracted
+#[tokio::test]
+async fn test_statistics_extraction() {
+    let test_data_dir = get_test_data_dir();
+    let orc_file = test_data_dir.join("alltypes.snappy.orc");
+
+    let object_store = create_test_object_store();
+    let format = OrcFormat::new();
+
+    let file_path = to_object_store_path(&orc_file);
+    let file_meta = object_store
+        .head(&file_path)
+        .await
+        .expect("Failed to get file metadata");
+
+    let ctx = SessionContext::new();
+    let session_state = ctx.state();
+
+    let schema = format
+        .infer_schema(&session_state, &object_store, &[file_meta.clone()])
+        .await
+        .expect("Failed to infer schema");
+
+    let stats = format
+        .infer_stats(&session_state, &object_store, schema, &file_meta)
+        .await
+        .expect("Failed to infer statistics");
+
+    assert_eq!(stats.num_rows, Precision::Exact(11));
+
+    match stats.total_byte_size {
+        Precision::Exact(size) => assert!(size > 0, "Expected positive byte size"),
+        _ => panic!("Expected exact byte size"),
+    }
+}
+
+// =============================================================================
+// Data Type Edge Cases Tests
+// =============================================================================
+
+/// Test reading NULL values across all columns
+#[tokio::test]
+async fn test_data_null_values() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "nulls", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("nulls")
+        .await
+        .expect("Table exists")
+        .filter(col("int8").is_null())
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Expected 2 rows with NULL int8");
+}
+
+/// Test reading extreme values (min/max for data types)
+#[tokio::test]
+async fn test_data_extreme_values() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "extremes", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("extremes")
+        .await
+        .expect("Table exists")
+        .select_columns(&["int8", "int64"])
+        .expect("Projection should succeed")
+        .filter(col("int8").eq(lit(127i8)).or(col("int8").eq(lit(-128i8))))
+        .expect("Filter should succeed")
+        .sort(vec![col("int8").sort(true, true)])
+        .expect("Sort should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+------+----------------------+",
+        "| int8 | int64                |",
+        "+------+----------------------+",
+        "| -128 | -9223372036854775808 |",
+        "| 127  | 9223372036854775807  |",
+        "+------+----------------------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+/// Test reading special float values (inf, -inf)
+#[tokio::test]
+async fn test_data_special_float_values() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "floats", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("floats")
+        .await
+        .expect("Table exists")
+        .select_columns(&["int8", "float32", "float64"])
+        .expect("Projection should succeed")
+        .filter(col("int8").eq(lit(127i8)).or(col("int8").eq(lit(-128i8))))
+        .expect("Filter should succeed")
+        .sort(vec![col("int8").sort(true, true)])
+        .expect("Sort should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+------+---------+---------+",
+        "| int8 | float32 | float64 |",
+        "+------+---------+---------+",
+        "| -128 | -inf    | -inf    |",
+        "| 127  | inf     | inf     |",
+        "+------+---------+---------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+/// Test reading decimal values with precision
+#[tokio::test]
+async fn test_data_decimal_precision() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "decimals", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("decimals")
+        .await
+        .expect("Table exists")
+        .select_columns(&["int8", "decimal"])
+        .expect("Projection should succeed")
+        .filter(
+            col("int8")
+                .gt_eq(lit(50i8))
+                .and(col("int8").lt_eq(lit(53i8))),
+        )
+        .expect("Filter should succeed")
+        .sort(vec![col("int8").sort(true, true)])
+        .expect("Sort should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 4, "Expected 4 rows");
+}
+
+/// Test reading Unicode/UTF-8 strings
+#[tokio::test]
+async fn test_data_unicode_strings() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "unicode", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("unicode")
+        .await
+        .expect("Table exists")
+        .select_columns(&["utf8"])
+        .expect("Projection should succeed")
+        .filter(col("utf8").eq(lit("🤔")))
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = ["+------+", "| utf8 |", "+------+", "| 🤔   |", "+------+"];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+// =============================================================================
+// Projection Edge Cases Tests
+// =============================================================================
+
+/// Test selecting a single column
+#[tokio::test]
+async fn test_projection_single_column() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "single", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("single")
+        .await
+        .expect("Table exists")
+        .select_columns(&["boolean"])
+        .expect("Projection should succeed")
+        .filter(col("boolean").eq(lit(false)))
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+---------+",
+        "| boolean |",
+        "+---------+",
+        "| false   |",
+        "| false   |",
+        "| false   |",
+        "+---------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+/// Test selecting all columns explicitly
+#[tokio::test]
+async fn test_projection_all_columns_explicit() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "allcols", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("allcols")
+        .await
+        .expect("Table exists")
+        .select_columns(&[
+            "boolean", "int8", "int16", "int32", "int64", "float32", "float64", "decimal",
+            "binary", "utf8", "date32",
+        ])
+        .expect("Projection should succeed")
+        .filter(col("int8").eq(lit(0i8)))
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 1, "Expected 1 row with int8 = 0");
+}
+
+/// Test selecting columns in reverse order
+#[tokio::test]
+async fn test_projection_reverse_order() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "reverse", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("reverse")
+        .await
+        .expect("Table exists")
+        .select_columns(&["date32", "utf8", "int8", "boolean"])
+        .expect("Projection should succeed")
+        .filter(col("int8").eq(lit(1i8)))
+        .expect("Filter should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+------------+------+------+---------+",
+        "| date32     | utf8 | int8 | boolean |",
+        "+------------+------+------+---------+",
+        "| 1970-01-02 | a    | 1    | false   |",
+        "+------------+------+------+---------+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+// =============================================================================
+// Complex Query Tests
+// =============================================================================
+
+/// Test aggregation query using DataFrame API
+#[tokio::test]
+async fn test_query_aggregation() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "agg", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("agg")
+        .await
+        .expect("Table exists")
+        .filter(col("int8").is_not_null())
+        .expect("Filter should succeed")
+        .aggregate(
+            vec![],
+            vec![count(lit(1i64)), min(col("int8")), max(col("int8"))],
+        )
+        .expect("Aggregate should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 1, "Expected 1 aggregation result row");
+}
+
+/// Test GROUP BY query using DataFrame API
+#[tokio::test]
+async fn test_query_group_by() {
+    let ctx = SessionContext::new();
+    register_orc_table(&ctx, "groupby", "alltypes.snappy.orc")
+        .await
+        .expect("Failed to register table");
+
+    let df = ctx
+        .table("groupby")
+        .await
+        .expect("Table exists")
+        .filter(col("boolean").is_not_null())
+        .expect("Filter should succeed")
+        .aggregate(vec![col("boolean")], vec![count(lit(1i64)).alias("cnt")])
+        .expect("Aggregate should succeed")
+        .sort(vec![col("boolean").sort(true, true)])
+        .expect("Sort should succeed");
+
+    let batches = df.collect().await.expect("Failed to collect batches");
+
+    let expected = [
+        "+---------+-----+",
+        "| boolean | cnt |",
+        "+---------+-----+",
+        "| false   | 3   |",
+        "| true    | 6   |",
+        "+---------+-----+",
+    ];
+
+    assert_batches_eq!(expected, &batches);
+}
+
+// =============================================================================
+// Format Factory Tests
+// =============================================================================
+
+/// Test OrcFormatFactory creates correct format
+#[tokio::test]
+async fn test_format_factory() {
+    use datafusion_common::GetExt;
+    use datafusion_datasource::file_format::FileFormatFactory;
+    use datafusion_datasource_orc::OrcFormatFactory;
+
+    let factory = OrcFormatFactory::new();
+
+    assert_eq!(factory.get_ext(), "orc");
+
+    let format = factory.default();
+    assert_eq!(format.get_ext(), "orc");
+}
+
+/// Test OrcFormat file extension methods
+#[tokio::test]
+async fn test_format_extension() {
+    use datafusion_datasource::file_compression_type::FileCompressionType;
+
+    let format = OrcFormat::new();
+
+    assert_eq!(format.get_ext(), "orc");
+
+    let ext_with_compression = format
+        .get_ext_with_compression(&FileCompressionType::UNCOMPRESSED)
+        .unwrap();
+    assert_eq!(ext_with_compression, "orc");
 }

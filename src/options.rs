@@ -76,10 +76,7 @@ pub struct OrcFormatOptions {
 
 impl OrcFormatOptions {
     /// Apply a set of key-value options from a DataFusion format options map.
-    pub fn apply_format_options(
-        &mut self,
-        format_options: &HashMap<String, String>,
-    ) -> Result<()> {
+    pub fn apply_format_options(&mut self, format_options: &HashMap<String, String>) -> Result<()> {
         for (key, value) in format_options {
             match key.as_str() {
                 "orc.batch_size" => {

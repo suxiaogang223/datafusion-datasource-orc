@@ -131,7 +131,9 @@ mod tests {
         let object_meta = store.head(&path).await.unwrap();
 
         let schema = read_orc_schema(&store, &object_meta).await.unwrap();
-        let stats = read_orc_statistics(&store, &object_meta, schema).await.unwrap();
+        let stats = read_orc_statistics(&store, &object_meta, schema)
+            .await
+            .unwrap();
 
         // Verify row count
         assert_eq!(stats.num_rows, Precision::Exact(11));
