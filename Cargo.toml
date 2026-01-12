@@ -17,7 +17,7 @@
 
 [package]
 name = "datafusion-datasource-orc"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 authors = ["suxiaogang223 <suxiaogang223@icloud.com>"]
 license = "Apache-2.0"
@@ -25,9 +25,24 @@ description = "ORC file format support for Apache DataFusion"
 readme = "README.md"
 repository = "https://github.com/suxiaogang223/datafusion-datasource-orc"
 rust-version = "1.73"
+categories = ["database", "data-structures", "parsing", "encoding"]
+keywords = ["datafusion", "orc", "arrow", "database", "analytics", "sql", "async"]
+exclude = [
+    "docs/",
+    "scripts/",
+    "benches/",
+    "tests/",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude/",
+    ".github/",
+]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[package.metadata]
+publish = false  # Remove this line when ready to publish
 
 [dependencies]
 # Arrow
@@ -63,12 +78,16 @@ bytes = "1.11"
 log = "^0.4"
 itertools = "0.14"
 
-# Benchmark dependencies (for tpcds_bench binary)
-datafusion = { version = "51.0.0", default-features = false, features = ["sql"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-structopt = { version = "0.3", default-features = false }
-env_logger = "0.11"
+# Benchmark dependencies (for tpcds_bench binary, optional)
+datafusion = { version = "51.0.0", default-features = false, features = ["sql"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+structopt = { version = "0.3", default-features = false, optional = true }
+env_logger = { version = "0.11", optional = true }
+
+[features]
+default = []
+tpcds-bench = ["datafusion", "serde", "serde_json", "structopt", "env_logger"]
 
 [dev-dependencies]
 # Test utilities
@@ -89,6 +108,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "tpcds_bench"
 path = "src/bin/tpcds_bench.rs"
+required-features = ["tpcds-bench"]
 
 [[bench]]
 name = "orc_query_sql"
